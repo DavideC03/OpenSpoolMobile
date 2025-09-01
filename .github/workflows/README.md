@@ -20,9 +20,9 @@ This repository uses GitHub Actions for continuous integration and deployment.
 
 - Node.js >= 18
 - Java 17 (for Android builds)
-- Android SDK API 35
-- Android Build Tools 35.0.0
-- Android NDK 26.1.10909125
+- Android SDK API 34
+- Android Build Tools 34.0.0
+- Android NDK 25.1.8937393
 
 ## Artifacts
 

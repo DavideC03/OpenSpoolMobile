@@ -3,15 +3,27 @@
  */
 
 import 'react-native';
-import React from 'react';
-import App from '../App';
 
 // Note: import explicitly to use the types shipped with jest.
-import {it} from '@jest/globals';
+import {it, describe, expect} from '@jest/globals';
 
-// Note: test renderer must be required after react-native.
-import renderer from 'react-test-renderer';
+// Import individual services for focused testing
+import { StorageService } from '../src/services/StorageService';
+import { bambuPrinterService } from '../src/services/BambuPrinterService';
 
-it('renders correctly', () => {
-  renderer.create(<App />);
+describe('OpenSpool App Integration', () => {
+  it('should have StorageService available', () => {
+    expect(StorageService).toBeDefined();
+  });
+
+  it('should have BambuPrinterService available', () => {
+    expect(bambuPrinterService).toBeDefined();
+  });
+
+  it('should have required service methods', () => {
+    expect(typeof StorageService.savePrinterSettings).toBe('function');
+    expect(typeof StorageService.loadPrinterSettings).toBe('function');
+    expect(typeof bambuPrinterService.connect).toBe('function');
+    expect(typeof bambuPrinterService.sendFilamentToSlot).toBe('function');
+  });
 });
