@@ -28,8 +28,22 @@ Reads/Writes NFC tags for 3d printer filament.
 
 ![](./images/Simulator%20Screenshot%20-%20iPhone%2016%20Pro%20Max%20-%202025-01-14%20at%2022.13.31.png)
 
+# Development
 
-# Releasing
+## GitHub Actions CI/CD
+
+This repository includes automated workflows:
+
+- **CI**: Runs on every push and PR to lint the code
+- **Android Build**: Builds Android APK and AAB artifacts on every push and PR
+
+The Android build workflow:
+- Sets up Node.js 18, Java 17, and Android SDK
+- Installs dependencies and runs linting
+- Builds both release APK and AAB (Android App Bundle)
+- Uploads build artifacts for download
+
+## Releasing
 
 ```
 Change version number in android/app/build.gradle
