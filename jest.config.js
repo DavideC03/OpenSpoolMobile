@@ -5,5 +5,7 @@ module.exports = {
   ],
   moduleNameMapper: {
     '\\.(png|jpg|jpeg|gif|svg)$': 'identity-obj-proxy',
+    '^@/(.*)$': '<rootDir>/src/$1',
   },
+  testEnvironment: 'node',
 };

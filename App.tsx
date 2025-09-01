@@ -449,7 +449,7 @@ const OpenSpool = () => {
               <Dropdown
                 style={styles.dropdown}
                 containerStyle={styles.dropdownContainer}
-                data={temperatures.filter(temp => parseInt(temp.value) > parseInt(minTemp))}
+                data={temperatures.filter(temp => parseInt(temp.value, 10) > parseInt(minTemp, 10))}
                 labelField="label"
                 valueField="value"
                 placeholder="Max temp"
