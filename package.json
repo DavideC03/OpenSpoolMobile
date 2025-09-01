@@ -14,11 +14,11 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
-    "mqtt": "^5.14.0",
     "react": "18.3.1",
     "react-native": "0.76.5",
     "react-native-element-dropdown": "^2.12.2",
-    "react-native-tcp-socket": "^6.3.0"
+    "react-native-tcp-socket": "^6.3.0",
+    "sp-react-native-mqtt": "^0.6.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

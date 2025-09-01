@@ -1,4 +1,4 @@
-import mqtt from 'mqtt';
+import MQTT from 'sp-react-native-mqtt';
 
 export interface PrinterSettings {
   ipAddress: string;
@@ -24,6 +24,7 @@ export interface SlotInfo {
 export class BambuPrinterService {
   private client: any = null;
   private settings: PrinterSettings | null = null;
+  private connected: boolean = false;
 
   // Available slots for filament
   static getAvailableSlots(): SlotInfo[] {
@@ -92,30 +93,47 @@ export class BambuPrinterService {
 
     return new Promise((resolve, reject) => {
       try {
-        const url = `mqtt://${this.settings!.ipAddress}:1883`;
-        this.client = mqtt.connect(url, {
+        const uri = `mqtt://${this.settings!.ipAddress}:1883`;
+
+        MQTT.createClient({
+          uri,
           clientId: `openspool_mobile_${Date.now()}`,
-          username: 'bblp',
-          password: this.settings!.accessCode || '',
-          connectTimeout: 5000,
-        });
+          user: 'bblp',
+          pass: this.settings!.accessCode || '',
+          keepalive: 30,
+        }).then((client) => {
+          this.client = client;
 
-        this.client.on('connect', () => {
-          console.log('Connected to Bambu printer');
-          resolve(true);
-        });
+          client.on('connect', () => {
+            console.log('Connected to Bambu printer');
+            this.connected = true;
+            resolve(true);
+          });
 
-        this.client.on('error', (error: any) => {
-          console.error('MQTT connection error:', error);
+          client.on('error', (error: any) => {
+            console.error('MQTT connection error:', error);
+            this.connected = false;
+            reject(error);
+          });
+
+          client.on('closed', () => {
+            console.log('MQTT connection closed');
+            this.connected = false;
+          });
+
+          // Timeout after 10 seconds
+          setTimeout(() => {
+            if (!this.isConnected()) {
+              reject(new Error('Connection timeout'));
+            }
+          }, 10000);
+
+          // Start the connection
+          client.connect();
+        }).catch((error) => {
+          console.error('Failed to create MQTT client:', error);
           reject(error);
         });
-
-        // Timeout after 10 seconds
-        setTimeout(() => {
-          if (!this.client.connected) {
-            reject(new Error('Connection timeout'));
-          }
-        }, 10000);
       } catch (error) {
         reject(error);
       }
@@ -123,7 +141,7 @@ export class BambuPrinterService {
   }
 
   async sendFilamentToSlot(filamentData: FilamentData, slot: SlotInfo): Promise<boolean> {
-    if (!this.client || !this.client.connected) {
+    if (!this.client || !this.isConnected()) {
       throw new Error('Not connected to printer');
     }
 
@@ -160,16 +178,13 @@ export class BambuPrinterService {
 
         console.log('Sending filament data:', JSON.stringify(payload, null, 2));
 
-        this.client.publish(topic, JSON.stringify(payload), { qos: 0 }, (error: any) => {
-          if (error) {
-            console.error('Failed to send filament data:', error);
-            reject(error);
-          } else {
-            console.log('Filament data sent successfully');
-            resolve(true);
-          }
-        });
+        // sp-react-native-mqtt publish API: publish(topic, payload, qos, retain)
+        this.client.publish(topic, JSON.stringify(payload), 0, false);
+
+        console.log('Filament data sent successfully');
+        resolve(true);
       } catch (error) {
+        console.error('Failed to send filament data:', error);
         reject(error);
       }
     });
@@ -177,13 +192,19 @@ export class BambuPrinterService {
 
   disconnect() {
     if (this.client) {
-      this.client.end();
+      this.client.disconnect();
       this.client = null;
+      this.connected = false;
     }
   }
 
   isConnected(): boolean {
-    return this.client && this.client.connected;
+    return this.connected && this.client !== null;
+  }
+
+  // Getter for testing purposes
+  getSettings(): PrinterSettings | null {
+    return this.settings;
   }
 }
 

@@ -1,38 +1,63 @@
-// Simple unit tests for functions that don't require MQTT
-describe('BambuPrinterService static methods', () => {
-  it('should return available slots', () => {
-    const slots = [
-      { id: 'external', label: 'External Spool', amsId: 255, trayId: 254 },
-      { id: 'ams1', label: 'AMS Slot 1', amsId: 0, trayId: 0 },
-      { id: 'ams2', label: 'AMS Slot 2', amsId: 0, trayId: 1 },
-      { id: 'ams3', label: 'AMS Slot 3', amsId: 0, trayId: 2 },
-      { id: 'ams4', label: 'AMS Slot 4', amsId: 0, trayId: 3 },
-    ];
-    expect(slots).toHaveLength(5);
-    expect(slots[0]).toEqual({ id: 'external', label: 'External Spool', amsId: 255, trayId: 254 });
+import { BambuPrinterService, PrinterSettings, FilamentData, SlotInfo } from '../src/services/BambuPrinterService';
+
+// Mock the MQTT library
+jest.mock('sp-react-native-mqtt');
+
+describe('BambuPrinterService', () => {
+  let service: BambuPrinterService;
+  beforeEach(() => {
+    service = new BambuPrinterService();
+    jest.clearAllMocks();
   });
 
-  it('should get correct brand codes for different filament types', () => {
-    // Since we can't import the service directly due to MQTT dependency,
-    // we'll test the logic by duplicating the function
-    const getBrandCode = (type: string, brand: string): string => {
-      const typeUpper = type.toUpperCase();
-      const brandLower = brand.toLowerCase();
+  describe('static methods', () => {
+    it('should return available slots', () => {
+      const slots = BambuPrinterService.getAvailableSlots();
+      expect(slots).toHaveLength(5);
+      expect(slots[0]).toEqual({ id: 'external', label: 'External Spool', amsId: 255, trayId: 254 });
+      expect(slots[1]).toEqual({ id: 'ams1', label: 'AMS Slot 1', amsId: 0, trayId: 0 });
+    });
 
-      if (typeUpper === 'PLA') {
-        if (brandLower === 'bambu') {
-          return 'GFA00';
-        }
-        return 'GFL99';
-      } else if (typeUpper === 'TPU') {
-        return brandLower === 'bambu' ? 'GFU01' : 'GFU99';
-      }
-      return 'GFL99';
+    it('should get correct brand codes for different filament types', () => {
+      expect(BambuPrinterService.getBrandCode('PLA', 'Bambu')).toBe('GFA00');
+      expect(BambuPrinterService.getBrandCode('PLA', 'Generic')).toBe('GFL99');
+      expect(BambuPrinterService.getBrandCode('TPU', 'Bambu')).toBe('GFU01');
+      expect(BambuPrinterService.getBrandCode('TPU', 'Generic')).toBe('GFU99');
+      expect(BambuPrinterService.getBrandCode('PETG', 'Sunlu')).toBe('GFSNL08');
+      expect(BambuPrinterService.getBrandCode('PETG', 'Generic')).toBe('GFG99');
+      expect(BambuPrinterService.getBrandCode('ABS', 'Bambu')).toBe('GFB00');
+      expect(BambuPrinterService.getBrandCode('ABS', 'Generic')).toBe('GFB99');
+      expect(BambuPrinterService.getBrandCode('UNKNOWN', 'Generic')).toBe('GFL99');
+    });
+  });
+
+  describe('instance methods', () => {
+    const mockSettings: PrinterSettings = {
+      ipAddress: '192.168.1.100',
+      serialNumber: 'AC12345678',
+      accessCode: 'test123',
     };
 
-    expect(getBrandCode('PLA', 'Bambu')).toBe('GFA00');
-    expect(getBrandCode('PLA', 'Generic')).toBe('GFL99');
-    expect(getBrandCode('TPU', 'Bambu')).toBe('GFU01');
-    expect(getBrandCode('TPU', 'Generic')).toBe('GFU99');
+    it('should configure printer settings', () => {
+      service.configure(mockSettings);
+      expect(service.getSettings()).toEqual(mockSettings);
+    });
+
+    it('should throw error when connecting without settings', async () => {
+      await expect(service.connect()).rejects.toThrow('Printer settings not configured');
+    });
+
+    it('should throw error when sending filament data without connection', async () => {
+      const filamentData: FilamentData = {
+        color_hex: 'FF0000',
+        type: 'PLA',
+        min_temp: 200,
+        max_temp: 220,
+        brand: 'Bambu',
+      };
+      const slot: SlotInfo = { id: 'ams1', label: 'AMS Slot 1', amsId: 0, trayId: 0 };
+
+      await expect(service.sendFilamentToSlot(filamentData, slot)).rejects.toThrow('Not connected to printer');
+    });
   });
 });
