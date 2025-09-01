@@ -11,9 +11,12 @@ import {
   Modal,
   ActivityIndicator,
   Animated,
+  TextInput,
 } from 'react-native';
 import { Dropdown } from 'react-native-element-dropdown';
 import NfcManager, { NfcTech, Ndef } from 'react-native-nfc-manager';
+import { bambuPrinterService, BambuPrinterService, FilamentData } from './src/services/BambuPrinterService';
+import { StorageService } from './src/services/StorageService';
 
 const OpenSpool = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -25,6 +28,16 @@ const OpenSpool = () => {
   const [modalTitle, setModalTitle] = useState('Read Tag');
   const [readTagModalOpen, setReadTagModalOpen] = useState(false);
 
+  // Printer functionality state
+  const [printerSettingsModalOpen, setPrinterSettingsModalOpen] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState('external');
+  const [printerIpAddress, setPrinterIpAddress] = useState('');
+  const [printerSerialNumber, setPrinterSerialNumber] = useState('');
+  const [printerAccessCode, setPrinterAccessCode] = useState('');
+  const [isPrinterConnected, setIsPrinterConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [lastScannedFilament, setLastScannedFilament] = useState<FilamentData | null>(null);
+
   useEffect(() => {
     Animated.timing(rotateAnim, {
       toValue: 1,
@@ -33,7 +46,24 @@ const OpenSpool = () => {
     }).start(() => {
       setIsLoading(false);
     });
+
+    // Load saved printer settings
+    loadPrinterSettings();
   }, [rotateAnim]);
+
+  const loadPrinterSettings = async () => {
+    try {
+      const settings = await StorageService.loadPrinterSettings();
+      if (settings) {
+        setPrinterIpAddress(settings.ipAddress);
+        setPrinterSerialNumber(settings.serialNumber);
+        setPrinterAccessCode(settings.accessCode || '');
+        bambuPrinterService.configure(settings);
+      }
+    } catch (error) {
+      console.error('Failed to load printer settings:', error);
+    }
+  };
 
   const spin = rotateAnim.interpolate({
     inputRange: [0, 1],
@@ -80,7 +110,12 @@ const OpenSpool = () => {
     value: (180 + i * 5).toString(),
   }));
 
-  const filamentDefaults = {
+  const slots = BambuPrinterService.getAvailableSlots().map(slot => ({
+    label: slot.label,
+    value: slot.id,
+  }));
+
+  const filamentDefaults: { [key: string]: { minTemp: number; maxTemp: number } } = {
     pla: { minTemp: 190, maxTemp: 240 },
     petg: { minTemp: 220, maxTemp: 270 },
     abs: { minTemp: 240, maxTemp: 280 },
@@ -165,10 +200,22 @@ const OpenSpool = () => {
         var nfcColor = colors.find(c => c.hex.toLowerCase() === jsonValue.color_hex.toLowerCase());
         var nfcType = types.find(t => t.value.toLowerCase() === jsonValue.type.toLowerCase());
 
-        setColor(nfcColor?.value ?? 'blue');
-        setType(nfcType?.value ?? 'pla');
+        const newColor = nfcColor?.value ?? 'blue';
+        const newType = nfcType?.value ?? 'pla';
+
+        setColor(newColor);
+        setType(newType);
         setMinTemp(jsonValue.min_temp.toString());
         setMaxTemp(jsonValue.max_temp.toString());
+
+        // Store scanned filament data for printer functionality
+        setLastScannedFilament({
+          color_hex: jsonValue.color_hex,
+          type: newType,
+          min_temp: jsonValue.min_temp,
+          max_temp: jsonValue.max_temp,
+          brand: jsonValue.brand || 'Generic',
+        });
       } else {
         Alert.alert('Empty tag detected.');
       }
@@ -231,6 +278,76 @@ const OpenSpool = () => {
     NfcManager.cancelTechnologyRequest();
   };
 
+  const savePrinterSettings = async () => {
+    if (!printerIpAddress.trim() || !printerSerialNumber.trim()) {
+      Alert.alert('Error', 'Please enter both IP address and serial number.');
+      return;
+    }
+
+    try {
+      const settings = {
+        ipAddress: printerIpAddress.trim(),
+        serialNumber: printerSerialNumber.trim(),
+        accessCode: printerAccessCode.trim(),
+      };
+
+      await StorageService.savePrinterSettings(settings);
+      bambuPrinterService.configure(settings);
+      setPrinterSettingsModalOpen(false);
+      Alert.alert('Success', 'Printer settings saved successfully.');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save printer settings.');
+    }
+  };
+
+  const connectToPrinter = async () => {
+    if (!printerIpAddress.trim() || !printerSerialNumber.trim()) {
+      Alert.alert('Error', 'Please configure printer settings first.');
+      setPrinterSettingsModalOpen(true);
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const connected = await bambuPrinterService.connect();
+      setIsPrinterConnected(connected);
+      if (connected) {
+        Alert.alert('Success', 'Connected to printer successfully.');
+      }
+    } catch (error) {
+      setIsPrinterConnected(false);
+      Alert.alert('Connection Error', 'Failed to connect to printer. Please check your settings and network connection.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const sendFilamentToPrinter = async () => {
+    if (!lastScannedFilament) {
+      Alert.alert('Error', 'Please scan a filament tag first.');
+      return;
+    }
+
+    if (!isPrinterConnected) {
+      Alert.alert('Error', 'Please connect to printer first.');
+      return;
+    }
+
+    try {
+      const selectedSlotInfo = BambuPrinterService.getAvailableSlots().find(s => s.id === selectedSlot);
+      if (!selectedSlotInfo) {
+        Alert.alert('Error', 'Invalid slot selection.');
+        return;
+      }
+
+      await bambuPrinterService.sendFilamentToSlot(lastScannedFilament, selectedSlotInfo);
+      Alert.alert('Success', `Filament settings sent to ${selectedSlotInfo.label} successfully.`);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to send filament settings to printer.');
+      console.error('Send filament error:', error);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.card} overScrollMode="always">
@@ -262,7 +379,7 @@ const OpenSpool = () => {
             <Text style={styles.label}>Color</Text>
             <Dropdown
               style={styles.dropdown}
-              containerStyle={[styles.dropdownContainer, { 
+              containerStyle={[styles.dropdownContainer, {
                 maxHeight: 300,
                 backgroundColor: '#2d2d2d', // Darker background
               }]}
@@ -349,6 +466,61 @@ const OpenSpool = () => {
           </View>
         </View>
 
+        <View style={styles.printerSection}>
+          <Text style={styles.sectionTitle}>Printer Integration</Text>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Target Slot</Text>
+            <Dropdown
+              style={styles.dropdown}
+              containerStyle={styles.dropdownContainer}
+              data={slots}
+              labelField="label"
+              valueField="value"
+              placeholder="Select slot"
+              value={selectedSlot}
+              onChange={item => setSelectedSlot(item.value)}
+              placeholderStyle={styles.placeHolder}
+              selectedTextStyle={styles.selected}
+              renderItem={(item) => (
+                <Text style={[styles.colorLabel, { padding: 10 }]}>{item.label}</Text>
+              )}
+              activeColor="#3d3d3d"
+            />
+          </View>
+
+          <View style={styles.printerButtonContainer}>
+            <TouchableOpacity
+              style={[styles.button, styles.printerButton]}
+              onPress={() => setPrinterSettingsModalOpen(true)}
+            >
+              <Text style={styles.buttonText}>Settings</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, styles.printerButton, isPrinterConnected && styles.connectedButton]}
+              onPress={connectToPrinter}
+              disabled={isConnecting}
+            >
+              <Text style={styles.buttonText}>
+                {isConnecting ? 'Connecting...' : (isPrinterConnected ? 'Connected' : 'Connect')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                styles.printerButton,
+                (!lastScannedFilament || !isPrinterConnected) && styles.disabledButton,
+              ]}
+              onPress={sendFilamentToPrinter}
+              disabled={!lastScannedFilament || !isPrinterConnected}
+            >
+              <Text style={styles.buttonText}>Send to Printer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={styles.button}
@@ -404,6 +576,66 @@ const OpenSpool = () => {
           </View>
         </Modal>
       )}
+
+      {/* Printer Settings Modal */}
+      <Modal
+        visible={printerSettingsModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setPrinterSettingsModalOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Printer Settings</Text>
+              <TouchableOpacity onPress={() => setPrinterSettingsModalOpen(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>IP Address</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="192.168.1.100"
+                  placeholderTextColor="#999"
+                  value={printerIpAddress}
+                  onChangeText={setPrinterIpAddress}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Serial Number</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="01S00A123456789"
+                  placeholderTextColor="#999"
+                  value={printerSerialNumber}
+                  onChangeText={setPrinterSerialNumber}
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Access Code (optional)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="12345678"
+                  placeholderTextColor="#999"
+                  value={printerAccessCode}
+                  onChangeText={setPrinterAccessCode}
+                  secureTextEntry={true}
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.modalFooter} onPress={savePrinterSettings}>
+              <Text style={styles.modalFooterText}>Save Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -640,6 +872,47 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     color: '#333',
+  },
+  printerSection: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#404040',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  printerButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    gap: 8,
+  },
+  printerButton: {
+    flex: 1,
+  },
+  connectedButton: {
+    backgroundColor: '#0ACC38',
+    borderColor: '#0ACC38',
+  },
+  disabledButton: {
+    backgroundColor: '#555',
+    borderColor: '#555',
+    opacity: 0.6,
+  },
+  textInput: {
+    height: 40,
+    borderColor: '#404040',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#363636',
+    color: '#ffffff',
+    fontSize: 16,
   },
 });
 

@@ -1,0 +1,190 @@
+import mqtt from 'mqtt';
+
+export interface PrinterSettings {
+  ipAddress: string;
+  serialNumber: string;
+  accessCode?: string;
+}
+
+export interface FilamentData {
+  color_hex: string;
+  type: string;
+  min_temp: number;
+  max_temp: number;
+  brand: string;
+}
+
+export interface SlotInfo {
+  id: string;
+  label: string;
+  amsId: number;
+  trayId: number;
+}
+
+export class BambuPrinterService {
+  private client: any = null;
+  private settings: PrinterSettings | null = null;
+
+  // Available slots for filament
+  static getAvailableSlots(): SlotInfo[] {
+    return [
+      { id: 'external', label: 'External Spool', amsId: 255, trayId: 254 },
+      { id: 'ams1', label: 'AMS Slot 1', amsId: 0, trayId: 0 },
+      { id: 'ams2', label: 'AMS Slot 2', amsId: 0, trayId: 1 },
+      { id: 'ams3', label: 'AMS Slot 3', amsId: 0, trayId: 2 },
+      { id: 'ams4', label: 'AMS Slot 4', amsId: 0, trayId: 3 },
+    ];
+  }
+
+  // Get brand code mapping similar to OpenSpool ESP project
+  static getBrandCode(type: string, brand: string): string {
+    const typeUpper = type.toUpperCase();
+    const brandLower = brand.toLowerCase();
+
+    if (typeUpper === 'TPU') {
+      return brandLower === 'bambu' ? 'GFU01' : 'GFU99';
+    } else if (typeUpper === 'PLA') {
+      if (brandLower === 'polyterra') {
+        return 'GFL01';
+      }
+      if (brandLower === 'polylite') {
+        return 'GFL00';
+      }
+      if (brandLower === 'sunlu') {
+        return 'GFSNL03';
+      }
+      if (brandLower === 'bambu') {
+        return 'GFA00';
+      }
+      return 'GFL99';
+    } else if (typeUpper === 'PETG') {
+      if (brandLower === 'sunlu') {
+        return 'GFSNL08';
+      }
+      return 'GFG99';
+    } else if (typeUpper === 'ABS') {
+      return brandLower === 'bambu' ? 'GFB00' : 'GFB99';
+    } else if (typeUpper === 'ASA') {
+      return 'GFB98';
+    } else if (typeUpper === 'PC') {
+      return brandLower === 'bambu' ? 'GFC00' : 'GFC99';
+    } else if (typeUpper === 'PA') {
+      return 'GFN99';
+    } else if (typeUpper === 'PA-CF') {
+      return brandLower === 'bambu' ? 'GFN03' : 'GFN98';
+    } else if (typeUpper === 'PLA-CF') {
+      return 'GFL98';
+    } else if (typeUpper === 'PVA') {
+      return 'GFS99';
+    }
+
+    return 'GFL99'; // Default to generic PLA
+  }
+
+  configure(settings: PrinterSettings) {
+    this.settings = settings;
+  }
+
+  async connect(): Promise<boolean> {
+    if (!this.settings) {
+      throw new Error('Printer settings not configured');
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const url = `mqtt://${this.settings!.ipAddress}:1883`;
+        this.client = mqtt.connect(url, {
+          clientId: `openspool_mobile_${Date.now()}`,
+          username: 'bblp',
+          password: this.settings!.accessCode || '',
+          connectTimeout: 5000,
+        });
+
+        this.client.on('connect', () => {
+          console.log('Connected to Bambu printer');
+          resolve(true);
+        });
+
+        this.client.on('error', (error: any) => {
+          console.error('MQTT connection error:', error);
+          reject(error);
+        });
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          if (!this.client.connected) {
+            reject(new Error('Connection timeout'));
+          }
+        }, 10000);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async sendFilamentToSlot(filamentData: FilamentData, slot: SlotInfo): Promise<boolean> {
+    if (!this.client || !this.client.connected) {
+      throw new Error('Not connected to printer');
+    }
+
+    if (!this.settings) {
+      throw new Error('Printer settings not configured');
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const topic = `device/${this.settings!.serialNumber}/request`;
+
+        // Ensure color hex has alpha channel
+        let colorHex = filamentData.color_hex;
+        if (colorHex.length === 6) {
+          colorHex += 'FF'; // Add full opacity
+        }
+
+        const brandCode = BambuPrinterService.getBrandCode(filamentData.type, filamentData.brand);
+
+        const payload = {
+          print: {
+            sequence_id: '0',
+            command: 'ams_filament_setting',
+            ams_id: slot.amsId,
+            tray_id: slot.trayId,
+            tray_color: colorHex,
+            nozzle_temp_min: filamentData.min_temp,
+            nozzle_temp_max: filamentData.max_temp,
+            tray_type: filamentData.type.toUpperCase(),
+            setting_id: '',
+            tray_info_idx: brandCode,
+          },
+        };
+
+        console.log('Sending filament data:', JSON.stringify(payload, null, 2));
+
+        this.client.publish(topic, JSON.stringify(payload), { qos: 0 }, (error: any) => {
+          if (error) {
+            console.error('Failed to send filament data:', error);
+            reject(error);
+          } else {
+            console.log('Filament data sent successfully');
+            resolve(true);
+          }
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  disconnect() {
+    if (this.client) {
+      this.client.end();
+      this.client = null;
+    }
+  }
+
+  isConnected(): boolean {
+    return this.client && this.client.connected;
+  }
+}
+
+export const bambuPrinterService = new BambuPrinterService();
