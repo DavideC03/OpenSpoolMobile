@@ -13,7 +13,7 @@ describe('BambuPrinterService static methods', () => {
   });
 
   it('should get correct brand codes for different filament types', () => {
-    // Since we can't import the service directly due to MQTT dependency, 
+    // Since we can't import the service directly due to MQTT dependency,
     // we'll test the logic by duplicating the function
     const getBrandCode = (type: string, brand: string): string => {
       const typeUpper = type.toUpperCase();

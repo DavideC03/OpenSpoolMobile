@@ -8,4 +8,6 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   testEnvironment: 'node',
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+  clearMocks: true,
 };
