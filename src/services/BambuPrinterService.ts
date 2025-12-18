@@ -93,7 +93,7 @@ export class BambuPrinterService {
 
     return new Promise((resolve, reject) => {
       try {
-        const uri = `mqtt://${this.settings!.ipAddress}:1883`;
+        const uri = `mqtt://${this.settings!.ipAddress}:8883`;
 
         MQTT.createClient({
           uri,
